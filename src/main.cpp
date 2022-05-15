@@ -18,20 +18,31 @@ using namespace sfx;
 using namespace gfx;
 using namespace arduino;
 
+// PIN ASSIGNMENTS
+
 #define P_SW1 48
 #define P_SW2 38
 #define P_SW3 39
 #define P_SW4 40
 
-#define LCD_CS 5
-#define LCD_MOSI 7
-#define LCD_MISO 10
-#define LCD_SCLK 6
+#define ENC_CLK 37
+#define ENC_DT 36
 
+// SD and LCD both hooked to SPI #0
+#define SPI_MOSI 7
+#define SPI_MISO 10
+#define SPI_CLK 6
+
+#define LCD_CS 5
 #define LCD_DC 4
 #define LCD_RST 8
+// BL is hooked to +3.3v
 #define LCD_BL -1
-using bus_t = tft_spi_ex<0,LCD_CS,LCD_MOSI,LCD_MISO,LCD_SCLK,SPI_MODE0,false>;
+
+#define SD_CS 11
+
+
+using bus_t = tft_spi_ex<0,LCD_CS,SPI_MOSI,SPI_MISO,SPI_CLK,SPI_MODE0,false>;
 // DC, RST, BL
 using lcd_t = ili9341<4,8,-1,bus_t,3,false,400,200>;
 using color_t = color<typename lcd_t::pixel_type>;
@@ -123,10 +134,10 @@ void setup() {
         Serial.println("Unable to create display task");
         while(true);
     }
-    tempo_encoder.attachFullQuad(37,36);
+    tempo_encoder.attachFullQuad(ENC_CLK,ENC_DT);
     // ensure the SPI bus is initialized
     lcd.initialize();
-    SD.begin(11,spi_container<0>::instance());
+    SD.begin(SD_CS,spi_container<0>::instance());
     Serial.printf("Card size: %fGB\n",SD.cardSize()/1024.0/1024.0/1024.0);
     
 restart:
@@ -160,7 +171,20 @@ restart:
     draw::text(lcd,title_size.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,45),spoint16::zero(),title,prangfnt,title_scale,color_t::red,color_t::white,true,true);
     if(SD.cardSize()==0) {
         draw_error("insert SD card");
-        while(true);
+        while(true) {
+            SD.end();
+            SD.begin(SD_CS,spi_container<0>::instance());
+            file=SD.open("/","r");
+            if(!file) {
+                delay(1);
+            } else {
+                file.close();
+                break;
+            }
+        }
+        
+        free(prang_font_buffer);
+        goto restart;
     }
     file = SD.open("/","r");
     size_t fn_count = 0;
@@ -189,7 +213,7 @@ restart:
     }
     midi_file* mfs = (midi_file*)malloc(fn_total*sizeof(midi_file));
     if(mfs==nullptr) {
-        Serial.println("too many files");
+        draw_error("too many files");
         while(1);
     }
     file = SD.open("/","r");
@@ -289,6 +313,19 @@ restart:
     --curfn;
     *curfn='/';
     file = SD.open(curfn, "rb");
+    if(!file) {
+        draw_error("re-insert SD card");
+        while(true) {
+            SD.end();
+            SD.begin(SD_CS,spi_container<0>::instance());
+            file=SD.open(curfn,"rb");
+            if(!file) {
+                delay(1);
+            } else {
+                break;
+            }
+        }
+    }
     ::free(fns-1);
     ::free(mfs);
     draw::filled_rectangle(lcd,lcd.bounds(),color_t::white);
