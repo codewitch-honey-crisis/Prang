@@ -31,7 +31,9 @@ public:
     ~midi_sampler();
     sfx::sfx_result update();
     void output(sfx::midi_output* value);
-    sfx::sfx_result start(size_t index);
+    int16_t timebase(size_t index) const;
+    unsigned long long elapsed(size_t index) const;
+    sfx::sfx_result start(size_t index,unsigned long long advance = 0);
     sfx::sfx_result stop(size_t index);
     void tempo_multiplier(float value);
     static sfx::sfx_result read(sfx::stream* stream,midi_sampler* out_sampler,void*(allocator)(size_t)=::malloc,void(deallocator)(void*)=::free);

@@ -62,6 +62,7 @@ uint8_t* song_buffer;
 size_t song_buffer_size;
 midi_esptinyusb out;
 int switches[4];
+int follow_track = -1;
 RingbufHandle_t signal_queue;
 TaskHandle_t display_task;
 void dump_midi(stream* stm, const midi_file& file) {
@@ -374,10 +375,19 @@ restart:
             }
             
         }
+        bool first_track = follow_track == -1;
+        bool changed = false;
         int b=digitalRead(P_SW1);
         if(b!=switches[0]) {
+            changed = true;
             if(b) {
-                sampler.start(0);
+                if(first_track) {
+                    follow_track = 0;
+                    sampler.start(0);
+                } else {
+                    sampler.start(0,sampler.elapsed(follow_track) % sampler.timebase(follow_track));
+                }
+                
             } else {
                 sampler.stop(0);
             }
@@ -385,8 +395,15 @@ restart:
         }
         b=digitalRead(P_SW2);
         if(b!=switches[1]) {
+            changed = true;
             if(b) {
-                sampler.start(1);
+                if(first_track) {
+                    follow_track = 1;
+                    sampler.start(1);
+                } else {
+                    sampler.start(1,sampler.elapsed(follow_track) % sampler.timebase(follow_track));
+                }
+                
             } else {
                 sampler.stop(1);
             }
@@ -394,8 +411,14 @@ restart:
         }
         b=digitalRead(P_SW3);
         if(b!=switches[2]) {
+            changed = true;
             if(b) {
-                sampler.start(2);
+                if(first_track) {
+                    follow_track = 2;
+                    sampler.start(2);
+                } else {
+                    sampler.start(2,sampler.elapsed(follow_track) % sampler.timebase(follow_track));
+                }
             } else {
                 sampler.stop(2);
             }
@@ -403,12 +426,28 @@ restart:
         }
         b=digitalRead(P_SW4);
         if(b!=switches[3]) {
+            changed = true;
             if(b) {
-                sampler.start(3);
+                if(first_track) {
+                    follow_track = 3;
+                    sampler.start(3);
+                } else {
+                    sampler.start(3,sampler.elapsed(follow_track) % sampler.timebase(follow_track));
+                }
             } else {
                 sampler.stop(3);
             }
             switches[3]=b;
+        }
+        if(follow_track!=-1 && !switches[follow_track]) {
+            // find the next follow track
+            follow_track = -1;
+            for(int i = 0;i<4;++i) {
+                if(switches[i]) {
+                    follow_track = i;
+                    break;
+                }
+            }
         }
         sampler.update();    
     }

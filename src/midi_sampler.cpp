@@ -104,7 +104,6 @@ sfx_result midi_sampler::read(stream* in,midi_sampler* out_sampler,void*(allocat
     }
     for(int i = 0;i<file.tracks_size;++i) {
         track& t = tracks[i];
-        t = track();
         t.buffer = nullptr;
     }
     for(int i = 0;i<file.tracks_size;++i) {
@@ -127,6 +126,8 @@ sfx_result midi_sampler::read(stream* in,midi_sampler* out_sampler,void*(allocat
         t.clock.tick_callback(callback,&t);
         t.buffer_size = mt.size;
         t.buffer_position = 0;
+        t.event.message.status = 0;
+        t.event.absolute = 0;
         t.output = nullptr;
     }
     out_sampler->m_allocator = allocator;
@@ -158,12 +159,42 @@ void midi_sampler::output(midi_output* value) {
         m_tracks[i].output = value;
     }
 }
-sfx_result midi_sampler::start(size_t index) {
+sfx_result midi_sampler::start(size_t index, unsigned long long advance) {
     if(0>index || index>=m_tracks_size) {
         return sfx_result::invalid_argument;
     }
     track& t = m_tracks[index];
     stop(index);
+    if(advance) {
+        const_buffer_stream cbs(t.buffer,t.buffer_size);
+        t.clock.elapsed(advance);
+        t.event.message.status = 0;
+        t.event.absolute = 0;
+        while(t.event.absolute<advance) {
+            size_t sz = midi_stream::decode_event(true,&cbs,&t.event);
+            if(sz==0) {
+                break;
+            }
+            t.buffer_position+=sz;
+            if(t.event.message.status==0xFF && t.event.message.meta.type==0x51) {
+                int32_t mt = (t.event.message.meta.data[0] << 16) | (t.event.message.meta.data[1] << 8) | t.event.message.meta.data[2];
+                // update the clock microtempo
+                t.base_microtempo = mt;
+                t.clock.microtempo(mt/t.tempo_multiplier);
+            } else if(t.output!=nullptr) {
+                switch(t.event.message.type()) {
+                    case midi_message_type::program_change:
+                    case midi_message_type::control_change:
+                    case midi_message_type::system_exclusive:
+                    case midi_message_type::end_system_exclusive:
+                        t.output->send(t.event.message);
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+    }
     t.clock.start();
     return sfx_result::success;
 }
@@ -194,4 +225,17 @@ void midi_sampler::tempo_multiplier(float value) {
         t.tempo_multiplier = value;
         t.clock.microtempo(t.base_microtempo/value);
     }
+}
+unsigned long long midi_sampler::elapsed(size_t index) const {
+    if(0>index || index>=m_tracks_size) {
+        return 0 ;
+    }
+    return m_tracks[index].clock.elapsed();
+}
+
+int16_t midi_sampler::timebase(size_t index) const {
+    if(0>index || index>=m_tracks_size) {
+        return 0 ;
+    }
+    return m_tracks[index].clock.timebase();
 }
