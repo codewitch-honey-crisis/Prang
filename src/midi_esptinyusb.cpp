@@ -29,7 +29,8 @@ sfx::sfx_result midi_esptinyusb::send(const sfx::midi_message& message) {
         return rr;
     }
     uint8_t buf[3];
-    if(message.type()==sfx::midi_message_type::meta_event && (message.meta.type!=0 || message.meta.data!=nullptr)) {
+    if(message.type()==sfx::midi_message_type::meta_event && 
+            (message.meta.type!=0 || message.meta.data!=nullptr)) {
         return sfx::sfx_result::success;
     }
     if (message.type()==sfx::midi_message_type::system_exclusive) {

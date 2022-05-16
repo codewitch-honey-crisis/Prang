@@ -2,13 +2,18 @@
 #include <sfx_midi_stream.hpp>
 #include <sfx_midi_file.hpp>
 using namespace sfx;
-void midi_sampler::callback(uint32_t pending,unsigned long long elapsed, void* pstate) {
+void midi_sampler::callback(uint32_t pending,
+        unsigned long long elapsed, 
+        void* pstate) {
     track *t = (track*)pstate;
     while(t->event.absolute<=elapsed) {
-        if (t->event.message.type() == midi_message_type::meta_event) {
+        if (t->event.message.type() ==
+                midi_message_type::meta_event) {
             // if it's a tempo event update the clock tempo
             if(t->event.message.meta.type == 0x51) {
-                int32_t mt = (t->event.message.meta.data[0] << 16) | (t->event.message.meta.data[1] << 8) | t->event.message.meta.data[2];
+                int32_t mt = (t->event.message.meta.data[0] << 16) | 
+                    (t->event.message.meta.data[1] << 8) | 
+                    t->event.message.meta.data[2];
                 // update the clock microtempo
                 t->base_microtempo = mt;
                 t->clock.microtempo(mt/t->tempo_multiplier);

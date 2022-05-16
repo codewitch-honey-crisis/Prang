@@ -5,7 +5,9 @@ note_tracker::note_tracker() {
 }
 void note_tracker::process(const sfx::midi_message& message) {
     sfx::midi_message_type t = message.type();
-    if(t==sfx::midi_message_type::note_off || (t==sfx::midi_message_type::note_on && message.msb()==0)) {
+    if(t==sfx::midi_message_type::note_off || 
+            (t==sfx::midi_message_type::note_on &&
+                    message.msb()==0)) {
         uint8_t c = message.channel();
         uint8_t n = message.lsb();
         if(n<64) {

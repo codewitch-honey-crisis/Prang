@@ -38,48 +38,27 @@ using namespace arduino;
 #define LCD_RST 8
 // BL is hooked to +3.3v
 #define LCD_BL -1
-
+#define LCD_ROTATION 3
 #define SD_CS 11
 
 
 using bus_t = tft_spi_ex<0,LCD_CS,SPI_MOSI,SPI_MISO,SPI_CLK,SPI_MODE0,false>;
-// DC, RST, BL
-using lcd_t = ili9341<4,8,-1,bus_t,3,false,400,200>;
+using lcd_t = ili9341<LCD_DC,LCD_RST,LCD_BL,bus_t,LCD_ROTATION,false,400,200>;
 using color_t = color<typename lcd_t::pixel_type>;
-using view_t = viewport<lcd_t>;
+
 lcd_t lcd;
-ESP32Encoder tempo_encoder;
-int64_t tempo_encoder_old_count;
-int32_t song_microtempo;
-int32_t song_microtempo_old;
+ESP32Encoder encoder;
+int64_t encoder_old_count;
 float tempo_multiplier;
 midi_sampler sampler;
-bool gblip;
-using lcd_color = color<rgb_pixel<16>>;
 uint8_t* prang_font_buffer;
 size_t prang_font_buffer_size;
-uint8_t* song_buffer;
-size_t song_buffer_size;
 midi_esptinyusb out;
 int switches[4];
 int follow_track = -1;
 RingbufHandle_t signal_queue;
 TaskHandle_t display_task;
-void dump_midi(stream* stm, const midi_file& file) {
-    printf("Type: %d\nTimebase: %d\n", (int)file.type, (int)file.timebase);
-    printf("Tracks: %d\n", (int)file.tracks_size);
-    for (int i = 0; i < (int)file.tracks_size; ++i) {
-        printf("\tOffset: %d, Size: %d, Preview: ", (int)file.tracks[i].offset, (int)file.tracks[i].size);
-        stm->seek(file.tracks[i].offset);
-        uint8_t buf[16];
-        size_t tsz = file.tracks[i].size;
-        size_t sz = stm->read(buf, tsz < 16 ? tsz : 16);
-        for (int j = 0; j < sz; ++j) {
-            printf("%02x", (int)buf[j]);
-        }
-        printf("\n");
-    }
-}
+
 static void draw_error(const char* text) {
     draw::filled_rectangle(lcd,lcd.bounds(),color_t::white);
     const open_font* pf=nullptr;
@@ -104,12 +83,15 @@ void setup() {
     pinMode(P_SW3,INPUT_PULLDOWN);
     pinMode(P_SW4,INPUT_PULLDOWN);
     memset(switches,0,sizeof(switches));
-    tempo_encoder_old_count = 0;
-    tempo_multiplier = 1.0;
     ESP32Encoder::useInternalWeakPullResistors=UP;
-    gblip = false;
+    encoder_old_count = 0;
+    encoder.attachFullQuad(ENC_CLK,ENC_DT);
     Serial.begin(115200);
     SPIFFS.begin();
+    // ensure the SPI bus is initialized
+    lcd.initialize();
+    SD.begin(SD_CS,spi_container<0>::instance());
+    tempo_multiplier = 1.0;
     signal_queue = xRingbufferCreate(sizeof(float) * 8 + (sizeof(float) - 1), RINGBUF_TYPE_NOSPLIT);
     if(signal_queue==nullptr) {
         Serial.println("Unable to create signal queue");
@@ -135,11 +117,7 @@ void setup() {
         Serial.println("Unable to create display task");
         while(true);
     }
-    tempo_encoder.attachFullQuad(ENC_CLK,ENC_DT);
-    // ensure the SPI bus is initialized
-    lcd.initialize();
-    SD.begin(SD_CS,spi_container<0>::instance());
-    Serial.printf("Card size: %fGB\n",SD.cardSize()/1024.0/1024.0/1024.0);
+    
     
 restart:
     lcd.fill(lcd.bounds(),color_t::white);
@@ -168,8 +146,20 @@ restart:
     }
     const char* title = "pr4nG";
     float title_scale = prangfnt.scale(200);
-    ssize16 title_size = prangfnt.measure_text(ssize16::max(),spoint16::zero(),title,title_scale);
-    draw::text(lcd,title_size.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,45),spoint16::zero(),title,prangfnt,title_scale,color_t::red,color_t::white,true,true);
+    ssize16 title_size = prangfnt.measure_text(ssize16::max(),
+                                            spoint16::zero(),
+                                            title,
+                                            title_scale);
+    draw::text(lcd,
+            title_size.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,45),
+            spoint16::zero(),
+            title,
+            prangfnt,
+            title_scale,
+            color_t::red,
+            color_t::white,
+            true,
+            true);
     if(SD.cardSize()==0) {
         draw_error("insert SD card");
         while(true) {
@@ -239,11 +229,6 @@ restart:
         f.close();
     }
     file.close();
-    str = fns;
-    for(int i = 0;i<fn_count;++i) {
-        Serial.println(str);
-        str+=strlen(str)+1;
-    }
     draw::filled_rectangle(lcd,lcd.bounds(),color_t::white);
     char* curfn = fns;
     if(fn_count>1) {
@@ -255,7 +240,7 @@ restart:
         fscale = Telegrama_otf.scale(20);
         bool done = false;
         size_t fni=0;
-        int64_t ocount = tempo_encoder.getCount()/4;
+        int64_t ocount = encoder.getCount()/4;
         int osw = digitalRead(P_SW1) || digitalRead(P_SW2) || digitalRead(P_SW3) || digitalRead(P_SW4);
         
         while(!done) {
@@ -275,7 +260,7 @@ restart:
             trc = tsz.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,133);
             draw::text(lcd,trc,spoint16::zero(),szt,Telegrama_otf,fscale,color_t::black,color_t::white,false);
             bool inc;
-            while(ocount==(tempo_encoder.getCount()/4)) {
+            while(ocount==(encoder.getCount()/4)) {
                 int sw = digitalRead(P_SW1) || digitalRead(P_SW2) || digitalRead(P_SW3) || digitalRead(P_SW4);
                 if(osw!=sw && !sw) {
                     // button was released
@@ -286,7 +271,7 @@ restart:
                 delay(1);
             }
             if(!done) {
-                int64_t count = (tempo_encoder.getCount()/4);
+                int64_t count = (encoder.getCount()/4);
                 inc = ocount>count;
                 ocount = count;
                 if(inc) {
@@ -309,8 +294,7 @@ restart:
     // avoids the 1 second init delay later
     out.initialize();
     tempo_multiplier = 1.0;
-    tempo_encoder_old_count = tempo_encoder.getCount()/4;
-    midi_file_source msrc;
+    encoder_old_count = encoder.getCount()/4;
     --curfn;
     *curfn='/';
     file = SD.open(curfn, "rb");
@@ -351,20 +335,16 @@ restart:
                 goto restart;
         }
     }
-    fs.seek(0);
-    midi_file mf;
-    midi_file::read(&fs,&mf);
-    dump_midi(&fs,mf);
     file.close();
     sampler.output(&out);
     xRingbufferSend(signal_queue,&tempo_multiplier,sizeof(tempo_multiplier),0);
     while(true) {
 
-        int64_t ec = tempo_encoder.getCount()/4;
-        if(ec!=tempo_encoder_old_count) {
-            bool inc = ec<tempo_encoder_old_count;
-            tempo_encoder_old_count=ec;
-            if(inc && tempo_multiplier<4.9) {
+        int64_t ec = encoder.getCount()/4;
+        if(ec!=encoder_old_count) {
+            bool inc = ec<encoder_old_count;
+            encoder_old_count=ec;
+            if(inc && tempo_multiplier<=4.9) {
                 tempo_multiplier+=.1;
                 sampler.tempo_multiplier(tempo_multiplier);
                 xRingbufferSend(signal_queue,&tempo_multiplier,sizeof(tempo_multiplier),0);
@@ -373,7 +353,6 @@ restart:
                 sampler.tempo_multiplier(tempo_multiplier);
                 xRingbufferSend(signal_queue,&tempo_multiplier,sizeof(tempo_multiplier),0);
             }
-            
         }
         bool first_track = follow_track == -1;
         bool changed = false;
