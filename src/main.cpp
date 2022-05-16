@@ -188,8 +188,12 @@ restart:
         if(!f.isDirectory()) {
             const char* fn = f.name();
             size_t fnl = strlen(fn);
-            if((fnl>5 && ((0==strcmp(".midi",fn+fnl-5) || (0==strcmp(".MIDI",fn+fnl-5) || fnl>5 && (0==strcmp(".Midi",fn+fnl-5))))))||
-            (fnl>4 && (0==strcmp(".mid",fn+fnl-4) || 0==strcmp(".MID",fn+fnl-4))  || 0==strcmp(".Mid",fn+fnl-4))) {
+            if((fnl>5 && ((0==strcmp(".midi",fn+fnl-5) || 
+                        (0==strcmp(".MIDI",fn+fnl-5) ||
+                        (0==strcmp(".Midi",fn+fnl-5))))))||
+            (fnl>4 && (0==strcmp(".mid",fn+fnl-4) || 
+                        0==strcmp(".MID",fn+fnl-4))  || 
+                        0==strcmp(".Mid",fn+fnl-4))) {
                 ++fn_count;
                 fn_total+=fnl+1;
             }
@@ -218,7 +222,12 @@ restart:
         if(!f.isDirectory()) {
             const char* fn = f.name();
             size_t fnl = strlen(fn);
-            if(fnl>4 && (0==strcmp(".mid",fn+fnl-4) || 0==strcmp(".MID",fn+fnl-4))) {
+            if((fnl>5 && ((0==strcmp(".midi",fn+fnl-5) || 
+                        (0==strcmp(".MIDI",fn+fnl-5) ||
+                        (0==strcmp(".Midi",fn+fnl-5))))))||
+            (fnl>4 && (0==strcmp(".mid",fn+fnl-4) || 
+                        0==strcmp(".MID",fn+fnl-4))  || 
+                        0==strcmp(".Mid",fn+fnl-4))) {
                 memcpy(str,fn,fnl+1);
                 str+=fnl+1;
                 file_stream ffs(f);
