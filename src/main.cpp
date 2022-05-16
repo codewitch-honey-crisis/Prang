@@ -78,6 +78,8 @@ static void draw_error(const char* text) {
     draw::text(lcd,rect,spoint16::zero(),text,*pf,scale,color_t::red,color_t::white,false);
 }
 void setup() {
+    Serial.begin(115200);
+    Serial.printf("Free heap on start: %f\n",ESP.getFreeHeap()/1024.0);
     pinMode(P_SW1,INPUT_PULLDOWN);
     pinMode(P_SW2,INPUT_PULLDOWN);
     pinMode(P_SW3,INPUT_PULLDOWN);
@@ -86,7 +88,6 @@ void setup() {
     ESP32Encoder::useInternalWeakPullResistors=UP;
     encoder_old_count = 0;
     encoder.attachFullQuad(ENC_CLK,ENC_DT);
-    Serial.begin(115200);
     SPIFFS.begin();
     // ensure the SPI bus is initialized
     lcd.initialize();
@@ -328,6 +329,7 @@ restart:
     ssize16 playing_size = prangfnt.measure_text(ssize16::max(),spoint16::zero(),playing_text,playing_scale);
     draw::text(lcd,playing_size.bounds().center((srect16)lcd.bounds()),spoint16::zero(),playing_text,prangfnt,playing_scale,color_t::red,color_t::white,false);
     free(prang_font_buffer);
+    Serial.printf("Free heap before MIDI file load: %f\n",ESP.getFreeHeap()/1024.0);
     file_stream fs(file);
     sfx_result r=midi_sampler::read(&fs,&sampler);
     if(r!=sfx_result::success) {
@@ -346,6 +348,8 @@ restart:
     }
     file.close();
     sampler.output(&out);
+    Serial.printf("Free heap after MIDI file load: %f\n",ESP.getFreeHeap()/1024.0);
+    
     xRingbufferSend(signal_queue,&tempo_multiplier,sizeof(tempo_multiplier),0);
     while(true) {
 
