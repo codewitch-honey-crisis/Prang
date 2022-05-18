@@ -46,6 +46,62 @@ using bus_t = tft_spi_ex<0,LCD_CS,SPI_MOSI,SPI_MISO,SPI_CLK,SPI_MODE0,false>;
 using lcd_t = ili9341<LCD_DC,LCD_RST,LCD_BL,bus_t,LCD_ROTATION,false,400,200>;
 using color_t = color<typename lcd_t::pixel_type>;
 
+struct midi_file_info final {
+    int type;
+    int tracks;
+    int32_t microtempo;
+};
+
+sfx_result scan_file(File& file, midi_file_info* out_info) {
+    midi_file mf;
+    file_stream fs(file);
+    sfx_result r = midi_file::read(&fs,&mf);
+    if(r!=sfx_result::success) {
+        return r;
+    }
+    out_info->tracks = (int)mf.tracks_size;
+    int32_t file_mt = 500000;
+    for(size_t i = 0;i<mf.tracks_size;++i) {
+        if(mf.tracks[i].offset!=fs.seek(mf.tracks[i].offset)) {
+            return sfx_result::end_of_stream;
+        }
+        bool found_tempo = false;
+        int32_t mt = 500000;
+        midi_event_ex me;
+        me.absolute = 0;
+        me.delta = 0;
+        while(fs.seek(0,seek_origin::current)<mf.tracks[i].size) {
+            size_t sz = midi_stream::decode_event(true,&fs,&me);
+            if(sz==0) {
+                return sfx_result::unknown_error;
+            }
+            if(me.message.status == 0xFF && me.message.meta.type == 0x51) {
+                int32_t mt2 = (me.message.meta.data[0] << 16) | 
+                    (me.message.meta.data[1] << 8) | 
+                    me.message.meta.data[2];
+                if(!found_tempo) {
+                    found_tempo = true;
+                    mt=mt2;
+                    file_mt = mt;
+                } else {
+                    if(mt!=file_mt) {
+                        mt=0;
+                        file_mt = 0;
+                        break;
+                    }
+                    if(mt!=mt2) {
+                        mt = 0;
+                        file_mt = 0;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    out_info->microtempo = file_mt;
+    out_info->type = mf.type;
+    return sfx_result::success;
+}
 int8_t sw_pins[] = { P_SW1, P_SW2, P_SW3, P_SW4 };
 lcd_t lcd;
 ESP32Encoder encoder;
@@ -61,7 +117,7 @@ int quantize_beats;
 int follow_track = -1;
 RingbufHandle_t signal_queue;
 TaskHandle_t display_task;
-
+midi_file_info file_info;
 static void draw_error(const char* text) {
     draw::filled_rectangle(lcd,lcd.bounds(),color_t::white);
     const open_font* pf=nullptr;
@@ -112,7 +168,11 @@ void setup() {
                 float f = *pf;
                 vRingbufferReturnItem(signal_queue,pf);
                 char text[64];
-                sprintf(text,"tempo x%0.1f",f);
+                if(file_info.microtempo==0) {
+                    sprintf(text,"tempo x%0.1f",f);
+                } else {
+                    sprintf(text,"tempo %0.1f",midi_utility::microtempo_to_tempo(file_info.microtempo/f));
+                }
                 ssize16 sz = Telegrama_otf.measure_text(ssize16::max(),spoint16::zero(),text,scale);
                 srect16 rect = sz.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,3);
                 draw::filled_rectangle(lcd,srect16(0,rect.y1,lcd.dimensions().width-1,rect.y2),color_t::white);
@@ -214,14 +274,22 @@ restart:
         draw_error("too many files");
         while(1);
     }
-    midi_file* mfs = (midi_file*)malloc(fn_total*sizeof(midi_file));
+    midi_file_info* mfs = (midi_file_info*)malloc(fn_total*sizeof(midi_file_info));
     if(mfs==nullptr) {
         draw_error("too many files");
         while(1);
     }
+    
+    float loading_scale = Telegrama_otf.scale(15);
+    char loading_buf[64];
+    sprintf(loading_buf, "loading file 0 of %d",(int)fn_count);
+    ssize16 loading_size = Telegrama_otf.measure_text(ssize16::max(),spoint16::zero(),loading_buf,loading_scale);
+    srect16 loading_rect = loading_size.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,lcd.dimensions().height-30);
+    draw::text(lcd,loading_rect,spoint16::zero(),loading_buf,Telegrama_otf,loading_scale,color_t::blue,color_t::white,false);
     file = SD.open("/","r");
     char* str = fns;
     int fi = 0;
+    int fli = 0;
     while(true) {
         File f = file.openNextFile();
         if(!f) {
@@ -236,11 +304,19 @@ restart:
             (fnl>4 && (0==strcmp(".mid",fn+fnl-4) || 
                         0==strcmp(".MID",fn+fnl-4))  || 
                         0==strcmp(".Mid",fn+fnl-4))) {
-                memcpy(str,fn,fnl+1);
-                str+=fnl+1;
-                file_stream ffs(f);
-                midi_file::read(&ffs,&mfs[fi]);
-                ++fi; 
+                ++fli;
+                sprintf(loading_buf, "loading file %d of %d",fli,(int)fn_count);
+                draw::filled_rectangle(lcd,loading_rect,color_t::white);
+                loading_size = Telegrama_otf.measure_text(ssize16::max(),spoint16::zero(),loading_buf,loading_scale);
+                loading_rect = loading_size.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,lcd.dimensions().height-30);
+                draw::text(lcd,loading_rect,spoint16::zero(),loading_buf,Telegrama_otf,loading_scale,color_t::blue,color_t::white,false);
+                if(sfx_result::success==scan_file(f,&mfs[fi])) {
+                    memcpy(str,fn,fnl+1);
+                    str+=fnl+1;
+                    ++fi; 
+                } else {
+                    --fn_count;
+                }
             }    
         }
         f.close();
@@ -248,6 +324,8 @@ restart:
     file.close();
     draw::filled_rectangle(lcd,lcd.bounds(),color_t::white);
     char* curfn = fns;
+    size_t fni=0;
+        
     if(fn_count>1) {
         const char* seltext = "select filE";
         float fscale = prangfnt.scale(80);
@@ -256,7 +334,6 @@ restart:
         draw::text(lcd,trc.offset(0,20),spoint16::zero(),seltext,prangfnt,fscale,color_t::red,color_t::white,false);
         fscale = Telegrama_otf.scale(20);
         bool done = false;
-        size_t fni=0;
         int64_t ocount = encoder.getCount()/4;
         int osw = digitalRead(P_SW1) || digitalRead(P_SW2) || digitalRead(P_SW3) || digitalRead(P_SW4);
         
@@ -272,9 +349,19 @@ restart:
             }
             draw::text(lcd,trc,spoint16::zero(),curfn,Telegrama_otf,fscale,px,color_t::white,false);
             char szt[64];
-            sprintf(szt,"%d tracks",(int)mfs[fni].tracks_size);
+            sprintf(szt,"%d tracks",(int)mfs[fni].tracks);
             tsz= Telegrama_otf.measure_text(ssize16::max(),spoint16::zero(),szt,fscale);
             trc = tsz.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,133);
+            draw::text(lcd,trc,spoint16::zero(),szt,Telegrama_otf,fscale,color_t::black,color_t::white,false);
+            int32_t mt = mfs[fni].microtempo;
+            if(mt==0) {
+                strcpy(szt,"tempo: varies");
+            } else {
+                sprintf(szt,"tempo: %0.1f",midi_utility::microtempo_to_tempo(mt));
+            }
+            tsz = Telegrama_otf.measure_text(ssize16::max(),spoint16::zero(),szt,fscale);
+            trc = tsz.bounds().center_horizontal((srect16)lcd.bounds()).offset(0,156);
+            draw::filled_rectangle(lcd,srect16(0,trc.y1,lcd.dimensions().width-1,trc.y2+trc.height()+5),color_t::white);
             draw::text(lcd,trc,spoint16::zero(),szt,Telegrama_otf,fscale,color_t::black,color_t::white,false);
             bool inc;
             while(ocount==(encoder.getCount()/4)) {
@@ -326,6 +413,7 @@ restart:
             }
         }
     }
+    file_info = mfs[fni];
     ::free(fns-1);
     ::free(mfs);
     draw::filled_rectangle(lcd,lcd.bounds(),color_t::white);
@@ -362,12 +450,12 @@ restart:
         if(ec!=encoder_old_count) {
             bool inc = ec<encoder_old_count;
             encoder_old_count=ec;
-            if(inc && tempo_multiplier<=4.9) {
-                tempo_multiplier+=.1;
+            if(inc && tempo_multiplier<=4.99) {
+                tempo_multiplier+=.01;
                 sampler.tempo_multiplier(tempo_multiplier);
                 xRingbufferSend(signal_queue,&tempo_multiplier,sizeof(tempo_multiplier),0);
-            } else if(tempo_multiplier>.1) {
-                tempo_multiplier-=.1;
+            } else if(tempo_multiplier>.01) {
+                tempo_multiplier-=.01;
                 sampler.tempo_multiplier(tempo_multiplier);
                 xRingbufferSend(signal_queue,&tempo_multiplier,sizeof(tempo_multiplier),0);
             }
