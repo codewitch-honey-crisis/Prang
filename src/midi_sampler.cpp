@@ -6,6 +6,13 @@ void midi_sampler::callback(uint32_t pending,
         unsigned long long elapsed, 
         void* pstate) {
     track *t = (track*)pstate;
+    if(t->delay>elapsed) {
+        //Serial.print(".");
+        return;
+    } else if(t->delay) {
+        t->clock.elapsed(elapsed-t->delay);
+        t->delay=0;
+    }
     while(t->event.absolute<=elapsed) {
         if (t->event.message.type() ==
                 midi_message_type::meta_event) {
@@ -131,6 +138,7 @@ sfx_result midi_sampler::read(stream* in,midi_sampler* out_sampler,void*(allocat
         t.clock.tick_callback(callback,&t);
         t.buffer_size = mt.size;
         t.buffer_position = 0;
+        t.delay = 0;
         t.event.message.status = 0;
         t.event.absolute = 0;
         t.output = nullptr;
@@ -164,18 +172,28 @@ void midi_sampler::output(midi_output* value) {
         m_tracks[i].output = value;
     }
 }
-sfx_result midi_sampler::start(size_t index, unsigned long long advance) {
+sfx_result midi_sampler::start(size_t index, long long advance) {
     if(0>index || index>=m_tracks_size) {
         return sfx_result::invalid_argument;
     }
     track& t = m_tracks[index];
     stop(index);
-    if(advance) {
+    if(advance>0) {
         const_buffer_stream cbs(t.buffer,t.buffer_size);
         t.clock.elapsed(advance);
         t.event.message.status = 0;
         t.event.absolute = 0;
         while(t.event.absolute<advance) {
+            if(t.buffer_position>=t.buffer_size) {
+                advance -= t.event.absolute;
+                t.event.absolute = 0;
+                t.event.message.~midi_message();
+                t.event.message.status = 0;
+                t.event.delta = 0;
+                t.delay = 0;
+                t.clock.elapsed(0);
+                t.buffer_position=0;
+            }
             size_t sz = midi_stream::decode_event(true,&cbs,&t.event);
             if(sz==0) {
                 break;
@@ -199,6 +217,8 @@ sfx_result midi_sampler::start(size_t index, unsigned long long advance) {
                 }
             }
         }
+    } else if(advance<0) {
+        t.delay = -advance;
     }
     t.clock.start();
     return sfx_result::success;
@@ -210,6 +230,7 @@ sfx_result midi_sampler::stop(size_t index) {
     track& t = m_tracks[index];
     t.clock.stop();
     t.buffer_position = 0;
+    t.delay = 0;
     t.event.absolute = 0;
     t.event.delta = 0;
     t.event.message.~midi_message();

@@ -46,6 +46,7 @@ using bus_t = tft_spi_ex<0,LCD_CS,SPI_MOSI,SPI_MISO,SPI_CLK,SPI_MODE0,false>;
 using lcd_t = ili9341<LCD_DC,LCD_RST,LCD_BL,bus_t,LCD_ROTATION,false,400,200>;
 using color_t = color<typename lcd_t::pixel_type>;
 
+int8_t sw_pins[] = { P_SW1, P_SW2, P_SW3, P_SW4 };
 lcd_t lcd;
 ESP32Encoder encoder;
 int64_t encoder_old_count;
@@ -55,6 +56,8 @@ uint8_t* prang_font_buffer;
 size_t prang_font_buffer_size;
 midi_esptinyusb out;
 int switches[4];
+int track_adv[4];
+int quantize_beats;
 int follow_track = -1;
 RingbufHandle_t signal_queue;
 TaskHandle_t display_task;
@@ -79,12 +82,14 @@ static void draw_error(const char* text) {
 }
 void setup() {
     Serial.begin(115200);
+    quantize_beats =4;
     Serial.printf("Free heap on start: %f\n",ESP.getFreeHeap()/1024.0);
     pinMode(P_SW1,INPUT_PULLDOWN);
     pinMode(P_SW2,INPUT_PULLDOWN);
     pinMode(P_SW3,INPUT_PULLDOWN);
     pinMode(P_SW4,INPUT_PULLDOWN);
     memset(switches,0,sizeof(switches));
+    memset(track_adv,0,sizeof(track_adv));
     ESP32Encoder::useInternalWeakPullResistors=UP;
     encoder_old_count = 0;
     encoder.attachFullQuad(ENC_CLK,ENC_DT);
@@ -119,7 +124,7 @@ void setup() {
         while(true);
     }
     
-    
+    Serial.printf("Free heap after primary task init: %f\n",ESP.getFreeHeap()/1024.0);
 restart:
     lcd.fill(lcd.bounds(),color_t::white);
     File file = SPIFFS.open("/MIDI.jpg","rb");
@@ -138,7 +143,6 @@ restart:
     prang_font_buffer_size = sz;
     file.close();
     const_buffer_stream fntstm(prang_font_buffer,prang_font_buffer_size);
-
     open_font prangfnt;
     gfx_result gr = open_font::open(&fntstm,&prangfnt);
     if(gr!=gfx_result::success) {
@@ -161,6 +165,9 @@ restart:
             color_t::white,
             true,
             true);
+    // avoids the 1 second init delay later
+    out.initialize();
+    
     if(SD.cardSize()==0) {
         draw_error("insert SD card");
         while(true) {
@@ -301,8 +308,6 @@ restart:
             }
         }
     }
-    // avoids the 1 second init delay later
-    out.initialize();
     tempo_multiplier = 1.0;
     encoder_old_count = encoder.getCount()/4;
     --curfn;
@@ -369,73 +374,50 @@ restart:
         }
         bool first_track = follow_track == -1;
         bool changed = false;
-        int b=digitalRead(P_SW1);
-        if(b!=switches[0]) {
-            changed = true;
-            if(b) {
-                if(first_track) {
-                    follow_track = 0;
-                    sampler.start(0);
+        unsigned long long smp_elapsed; 
+        unsigned long long adv=0;
+        
+        for(int i = 0; i<4;++i) {
+            int b=digitalRead(sw_pins[i]);
+            if((b==0 && switches[i]!=0) || (b!=0 && switches[i]==0)) {
+                changed = true;
+
+                if(b) {
+                    if(follow_track!=-1 && quantize_beats) {
+                        int tb = sampler.timebase(follow_track) * quantize_beats;
+                        smp_elapsed=sampler.elapsed(follow_track)-track_adv[follow_track];
+                        adv= smp_elapsed % tb;
+                        unsigned long long adv2=adv-tb;
+                        if(adv>-adv2) {
+                            Serial.println("Early");
+                            adv=adv2;
+                        } else if(adv!=0) {
+                            Serial.println("Late");
+                        }
+                        track_adv[i]=adv;
+                        
+                        sampler.start(i,adv);
+                        track_adv[i]=adv;
+                        
+                    } else { // if(follow_track==-1) 
+                        follow_track = i;
+                        sampler.start(i);
+                        track_adv[i]=0;
+                        
+                    } 
+                    switches[i]=1;
                 } else {
-                    sampler.start(0,sampler.elapsed(follow_track) % sampler.timebase(follow_track));
+                    sampler.stop(i);
+                    switches[i]=0;
                 }
-                
-            } else {
-                sampler.stop(0);
             }
-            switches[0]=b;
         }
-        b=digitalRead(P_SW2);
-        if(b!=switches[1]) {
-            changed = true;
-            if(b) {
-                if(first_track) {
-                    follow_track = 1;
-                    sampler.start(1);
-                } else {
-                    sampler.start(1,sampler.elapsed(follow_track) % sampler.timebase(follow_track));
-                }
-                
-            } else {
-                sampler.stop(1);
-            }
-            switches[1]=b;
-        }
-        b=digitalRead(P_SW3);
-        if(b!=switches[2]) {
-            changed = true;
-            if(b) {
-                if(first_track) {
-                    follow_track = 2;
-                    sampler.start(2);
-                } else {
-                    sampler.start(2,sampler.elapsed(follow_track) % sampler.timebase(follow_track));
-                }
-            } else {
-                sampler.stop(2);
-            }
-            switches[2]=b;
-        }
-        b=digitalRead(P_SW4);
-        if(b!=switches[3]) {
-            changed = true;
-            if(b) {
-                if(first_track) {
-                    follow_track = 3;
-                    sampler.start(3);
-                } else {
-                    sampler.start(3,sampler.elapsed(follow_track) % sampler.timebase(follow_track));
-                }
-            } else {
-                sampler.stop(3);
-            }
-            switches[3]=b;
-        }
+        
         if(follow_track!=-1 && !switches[follow_track]) {
             // find the next follow track
             follow_track = -1;
             for(int i = 0;i<4;++i) {
-                if(switches[i]) {
+                if(switches[i]!=0) {
                     follow_track = i;
                     break;
                 }
