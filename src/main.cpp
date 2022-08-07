@@ -114,7 +114,7 @@ int quantize_beats;
 int quantize_next_follow_track=-1;
 int* quantize_track_adv;
 int* quantized_pressed;
-
+uint32_t off_ts;
 void midi_task(void* state) {
     uint8_t buffer[MIDI_EVENT_PACKET_SIZE];
     uint16_t rcvd;
@@ -157,6 +157,9 @@ void midi_task(void* state) {
                     if((last_status&0x0F)==0 && note>=base_note && note<base_note+sampler.tracks_count()) {
                         if(note_on && vel>0) {
                             quantizer.start(note-base_note);
+                            qi.cmd=1;
+                            qi.value = (int)quantizer.last_timing();
+                            queue_to_main.send(qi,false);
                         } else {
                             quantizer.stop(note-base_note);
                         }
@@ -754,7 +757,6 @@ restart:
     
     free(prang_font_buffer);
     prang_font_buffer = nullptr;
-    Serial.printf("Free heap before MIDI file load: %f\n",ESP.getFreeHeap()/1024.0);
     quantize_track_adv = (int*)malloc(file_info.tracks*sizeof(int));
     if(quantize_track_adv==nullptr) {
         draw_error("MIDI file too big");
@@ -794,6 +796,7 @@ restart:
         delay(3000);
         goto restart;
     }
+    quantizer.quantize_beats(quantize_beats);
     Serial.printf("Free heap after MIDI file load: %f\n",ESP.getFreeHeap()/1024.0);
     sampler.output(&midi_out);
     for(int i = 0;i<sampler.tracks_count();++i) {
@@ -802,13 +805,40 @@ restart:
     sampler.tempo_multiplier(tempo_multiplier);
     encoder_old_count = encoder.getCount()/4;
     update_tempo_mult(false);
+    off_ts = 0;
     midi_thread = thread::create_affinity(1-thread::current().affinity(),midi_task,nullptr,24,4000);
     midi_thread.start();
 
 }
 
 void loop() {
-      bool inc;
+    queue_info qi;
+    
+    if(queue_to_main.receive(&qi,false)) {
+        if(qi.cmd==1) {
+            off_ts = millis()+1000;
+            auto px = color_t::white;
+            switch((int)qi.value)  {
+                case 0: 
+                    px = color_t::green;
+                    break;
+                case -1:
+                    px = color_t::blue;
+                    break;
+                case 1:
+                    px = color_t::red;
+                    break;
+                default:
+                    break;
+            }
+            draw::filled_ellipse(lcd,rect16(point16(20,20),10),px);
+        }
+    }
+    if(off_ts!=0 && millis()>=off_ts) {
+        off_ts = 0;
+        draw::filled_ellipse(lcd,rect16(point16(20,20),10),color_t::white);
+    }
+    bool inc;
     int64_t ec = (encoder.getCount()/4);
     if(encoder_old_count!=ec) {    
         inc = (encoder_old_count>ec);

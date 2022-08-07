@@ -26,6 +26,7 @@ public:
     inline size_t quantize_beats() const { return m_quantize_beats; }
     inline midi_sampler& sampler() const { return *m_sampler; }
     inline unsigned long long last_key_ticks() const { return m_last_key_ticks;}
+    inline midi_quantizer_timing last_timing() const { return m_last_timing;}
     void quantize_beats(int value);
     sfx::sfx_result start(size_t index);
     sfx::sfx_result stop(size_t index);
