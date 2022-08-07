@@ -1,4 +1,12 @@
-/* USB Host Shield must be modified to power the VBUS at 5v instead of 3.3v
+/*
+ESP32S3 DevkitC
+USBHostSheild 2.0 as shown here: https://www.pjrc.com/teensy/td_libs_USBHostShield.html
+SD Card Reader
+Rotary Encoder Knob
+Two Momentary Microswitches
+ILI9341 (designed for a 240x135 ST7789VW originally)
+
+ USB Host Shield must be modified to power the VBUS at 5v instead of 3.3v
 The resistor next to "2k2" must be removed.
 A wire from 5v to the VBUS contact behind the USB port must be soldered. */
 
@@ -818,70 +826,4 @@ void loop() {
         }
     }
 
-}
-
-// Poll USB MIDI Controler and send to serial MIDI
-void MIDI_poll() {
-    char buf[16];
-    uint8_t bufMidi[MIDI_EVENT_PACKET_SIZE];
-    uint16_t rcvd;
-
-    if (midi_in.RecvData(&rcvd, bufMidi) == 0) {
-        Serial.println("Received");
-        uint8_t* p = bufMidi+1;
-        if (((*p) & 0x80) != 0) {
-            Serial.println("Set status");
-            last_status = *p;
-            ++p;
-        } else {
-            for (int i = 0; i < MIDI_EVENT_PACKET_SIZE; i++) {
-                sprintf(buf, " %02X", bufMidi[i]);
-                Serial.print(buf);
-            }
-            Serial.println();
-        }
-        bool note_on = false;
-        int note;
-        int vel;
-        int j;
-        int s = (last_status<0xF0)? last_status & 0xF0:last_status;
-        switch ((midi_message_type)(s)) {
-            case midi_message_type::note_on:
-                note_on = true;
-            case midi_message_type::note_off:
-                note = *(p++);
-                vel = *(p++);
-                Serial.println("Send");
-                tud_midi_stream_write(0,bufMidi+1,3);
-                break;
-            case midi_message_type::polyphonic_pressure:
-            case midi_message_type::control_change:
-            case midi_message_type::pitch_wheel_change:
-            case midi_message_type::song_position:
-                tud_midi_stream_write(0,bufMidi+1,3);
-                break;
-            case midi_message_type::program_change:
-            case midi_message_type::channel_pressure:
-            case midi_message_type::song_select:
-                tud_midi_stream_write(0,bufMidi+1,2);
-                break;
-            case midi_message_type::system_exclusive:
-                for(j=2;j<sizeof(bufMidi);++j) {
-                    if(bufMidi[j]==0xF7) {
-                        break;
-                    }
-                }  
-                tud_midi_stream_write(0,bufMidi+1,j);
-                break;
-            case midi_message_type::reset:
-            case midi_message_type::end_system_exclusive:
-            case midi_message_type::active_sensing:
-            case midi_message_type::start_playback:
-            case midi_message_type::stop_playback:
-            case midi_message_type::tune_request:
-            case midi_message_type::timing_clock:
-                tud_midi_stream_write(0,bufMidi+1,1);
-                break;
-        }
-    }
 }
