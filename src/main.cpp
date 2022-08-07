@@ -1,35 +1,43 @@
+/* USB Host Shield must be modified to power the VBUS at 5v instead of 3.3v
+The resistor next to "2k2" must be removed.
+A wire from 5v to the VBUS contact behind the USB port must be soldered. */
+
 // PIN ASSIGNMENTS
 
-// P_SW1 48
-// P_SW2 38
-// P_SW3 39
-// P_SW4 40
+// USB and LCD all hooked to HSPI
+#define HSPI_MOSI 7
+#define HSPI_MISO 10
+#define HSPI_CLK 6
 
-// ENC_CLK 37
-// ENC_DT 36
+// SD hooked up to FSPI
+#define FSPI_MOSI 47
+#define FSPI_MISO 21
+#define FSPI_CLK 48
 
-// USB, SD and LCD all hooked to SPI #0
-#define FSPI_MOSI 7
-#define FSPI_MISO 10
-#define FSPI_CLK 6
-
-#define HSPI_MOSI 47
-#define HSPI_MISO 21
-#define HSPI_CLK 48
-
+// buttons are microswitch
+// momentary pushbuttons
+// closed high.
 #define BUTTON_A 38
 #define BUTTON_B 39
+// a rotary encoder is attached
+// as indicated
 #define ENC_CLK 37
 #define ENC_DATA 36
 
+// LCD is configured as follows
 #define LCD_CS 11
 #define LCD_DC 4
 #define LCD_RST 8
 // BL is hooked to +3.3v
 #define LCD_BL -1
 #define LCD_ROTATION 3
+
+// USB host CS
 #define USB_CS 5
+
+// SD Card reader CS
 #define SD_CS 1
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPIFFS.h>
@@ -53,7 +61,7 @@ using namespace arduino;
 using namespace sfx;
 using namespace gfx;
 using namespace freertos;
-using bus_t = tft_spi_ex<HSPI,LCD_CS,FSPI_MOSI,FSPI_MISO,FSPI_CLK,SPI_MODE0,true>;
+using bus_t = tft_spi_ex<HSPI,LCD_CS,HSPI_MOSI,HSPI_MISO,HSPI_CLK,SPI_MODE0,true>;
 using lcd_t = ili9342c<LCD_DC,LCD_RST,LCD_BL,bus_t,LCD_ROTATION,false,400,200>;
 using color_t = color<typename lcd_t::pixel_type>;
 
@@ -301,8 +309,8 @@ static void draw_error(const char* text) {
 void setup() {
     Serial.begin(115200);
     Serial.println("Prang booting");
-    spi_container<FSPI>::instance().begin(HSPI_CLK,HSPI_MISO,HSPI_MOSI);
-    spi_container<HSPI>::instance().begin(FSPI_CLK,FSPI_MISO,FSPI_MOSI);
+    spi_container<FSPI>::instance().begin(FSPI_CLK,FSPI_MISO,FSPI_MOSI);
+    spi_container<HSPI>::instance().begin(HSPI_CLK,HSPI_MISO,HSPI_MOSI);
     button_a.initialize();
     button_b.initialize();
     button_a.update();
