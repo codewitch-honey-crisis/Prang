@@ -220,14 +220,28 @@ void onInit() {
 sfx_result scan_file(File& file, midi_file_info* out_info) {
     midi_file mf;
     file_stream fs(file);
-    sfx_result r = midi_file::read(fs, &mf);
+    size_t len = (size_t)fs.seek(0,seek_origin::end);
+    fs.seek(0);
+    uint8_t* buffer = (uint8_t*)malloc(len);
+    if(buffer!=nullptr) {
+        fs.read(buffer,len);
+    }
+    const_buffer_stream bs(buffer,len);
+    stream& stm = buffer==nullptr?(stream&)fs:bs;
+    sfx_result r = midi_file::read(stm, &mf);
     if (r != sfx_result::success) {
+        if(buffer!=nullptr) {
+            free(buffer);
+        }
         return r;
     }
     out_info->tracks = (int)mf.tracks_size;
     int32_t file_mt = 500000;
     for (size_t i = 0; i < mf.tracks_size; ++i) {
-        if (mf.tracks[i].offset != fs.seek(mf.tracks[i].offset)) {
+        if (mf.tracks[i].offset != stm.seek(mf.tracks[i].offset)) {
+            if(buffer!=nullptr) {
+                free(buffer);
+            }
             return sfx_result::end_of_stream;
         }
         bool found_tempo = false;
@@ -235,9 +249,12 @@ sfx_result scan_file(File& file, midi_file_info* out_info) {
         midi_event_ex me;
         me.absolute = 0;
         me.delta = 0;
-        while (fs.seek(0, seek_origin::current) < mf.tracks[i].size) {
-            size_t sz = midi_stream::decode_event(true, fs, &me);
+        while (stm.seek(0, seek_origin::current) < mf.tracks[i].size) {
+            size_t sz = midi_stream::decode_event(true, stm, &me);
             if (sz == 0) {
+                if(buffer!=nullptr) {
+                    free(buffer);
+                }
                 return sfx_result::unknown_error;
             }
             if (me.message.status == 0xFF && me.message.meta.type == 0x51) {
@@ -265,6 +282,9 @@ sfx_result scan_file(File& file, midi_file_info* out_info) {
     }
     out_info->microtempo = file_mt;
     out_info->type = mf.type;
+    if(buffer!=nullptr) {
+        free(buffer);
+    }
     return sfx_result::success;
 }
 void load_prang_font(open_font* out_font) {
@@ -495,6 +515,7 @@ restart:
                     str += fnl + 1;
                     ++fi;
                 } else {
+                    Serial.println("Failed to scan file");
                     --fn_count;
                 }
             }
