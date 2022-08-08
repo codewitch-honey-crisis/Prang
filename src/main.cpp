@@ -347,6 +347,16 @@ static void draw_error(const char* text) {
     srect16 rect = sz.bounds().center((srect16)lcd.bounds());
     draw::text(lcd, rect, spoint16::zero(), text, *pf, scale, color_t::red, color_t::white, false);
 }
+void wait_and_restart() {
+    button_a.update();
+    button_b.update();
+    while(!button_a.pressed() && !button_b.pressed()) {
+        button_a.update();
+        button_b.update();
+        vTaskDelay(1);
+    }
+    ESP.restart();
+}
 void setup() {
     Serial.begin(115200);
     Serial.println("Prang booting");
@@ -469,10 +479,13 @@ restart:
     }
     file.close();
     char* fns = (char*)malloc(fn_total + 1) + 1;
+    if(fn_total==0) {
+        draw_error("no midi files");
+        wait_and_restart();
+    }
     if (fns == nullptr) {
         draw_error("too many files");
-        while (1)
-            ;
+        wait_and_restart();
     }
     midi_file_info* mfs = (midi_file_info*)malloc(fn_total * sizeof(midi_file_info));
     if (mfs == nullptr) {
