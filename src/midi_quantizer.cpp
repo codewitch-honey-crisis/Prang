@@ -53,7 +53,9 @@ void midi_quantizer::quantize_beats(int value) {
     m_quantize_beats = value;
 }
 sfx_result midi_quantizer::start(size_t index) {
-    if(m_sampler==nullptr || index<0||index>=m_sampler->tracks_count()) {
+    if(m_sampler==nullptr || 
+            index<0||
+            index>=m_sampler->tracks_count()) {
         return sfx_result::invalid_argument;
     }
     m_last_key_ticks = m_sampler->elapsed(index);
@@ -66,8 +68,10 @@ sfx_result midi_quantizer::start(size_t index) {
     }
     unsigned long long smp_elapsed; 
     unsigned long long adv=0;
-    int tb = m_sampler->timebase(m_follow_key) * m_quantize_beats;
-    smp_elapsed=m_sampler->elapsed(m_follow_key)-m_key_advance[m_follow_key];
+    int tb = m_sampler->timebase(m_follow_key) 
+                * m_quantize_beats;
+    smp_elapsed=m_sampler->elapsed(m_follow_key)
+                - m_key_advance[m_follow_key];
     adv= smp_elapsed % tb;
     unsigned long long adv2=adv-tb;
     if(adv>-adv2) {
@@ -84,7 +88,9 @@ sfx_result midi_quantizer::start(size_t index) {
     return sfx_result::success;
 }
 sfx_result midi_quantizer::stop(size_t index) {
-    if(m_sampler==nullptr || index<0||index>=m_sampler->tracks_count()) {
+    if(m_sampler==nullptr || 
+            index<0||
+            index>=m_sampler->tracks_count()) {
         return sfx_result::invalid_argument;
     }
     sfx_result r = m_sampler->stop(index);
