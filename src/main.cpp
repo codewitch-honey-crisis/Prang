@@ -219,6 +219,8 @@ void onInit() {
 }
 sfx_result scan_file(File& file, midi_file_info* out_info) {
     midi_file mf;
+    // try to load the file into a memory buffer
+    // and word from that
     file_stream fs(file);
     size_t len = (size_t)fs.seek(0,seek_origin::end);
     fs.seek(0,seek_origin::start);
