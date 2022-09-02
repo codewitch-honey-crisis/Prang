@@ -10,6 +10,9 @@ ILI9341 (designed for a 240x135 ST7789VW originally)
 The resistor next to "2k2" must be removed.
 A wire from 5v to the VBUS contact behind the USB port must be soldered. */
 
+// comment this out to use the ST7789V
+//#define USE_ILI9341
+
 // PIN ASSIGNMENTS
 
 // USB and LCD all hooked to HSPI
@@ -57,12 +60,15 @@ A wire from 5v to the VBUS contact behind the USB port must be soldered. */
 
 #include <gfx.hpp>
 #include <htcw_button.hpp>
+#ifdef USE_ILI9341
 #include <ili9341.hpp>
+#else
+#include <st7789.hpp>
+#endif
 #include <message_queue.hpp>
 #include <sfx.hpp>
 #include <tft_io.hpp>
 #include <thread.hpp>
-
 #include "midi_esptinyusb.hpp"
 #include "midi_quantizer.hpp"
 #include "midi_sampler.hpp"
@@ -72,7 +78,11 @@ using namespace sfx;
 using namespace gfx;
 using namespace freertos;
 using bus_t = tft_spi_ex<HSPI, LCD_CS, HSPI_MOSI, HSPI_MISO, HSPI_CLK, SPI_MODE0, true>;
-using lcd_t = ili9342c<LCD_DC, LCD_RST, LCD_BL, bus_t, LCD_ROTATION, false, 400, 200>;
+#ifdef USE_ILI9341
+using lcd_t = ili9341<LCD_DC, LCD_RST, LCD_BL, bus_t, LCD_ROTATION, false, 400, 200>;
+#else
+using lcd_t = st7789<135,240, LCD_DC, LCD_RST, LCD_BL, bus_t, LCD_ROTATION,true, 400, 200>;
+#endif
 using color_t = color<typename lcd_t::pixel_type>;
 
 midi_esptinyusb midi_out;
@@ -140,8 +150,8 @@ void midi_task(void* state) {
                 bool note_on = false;
                 int note;
                 int vel;
-                unsigned long long next_off_elapsed = 0;
-                int next_off_track = -1;
+                //unsigned long long next_off_elapsed = 0;
+                //int next_off_track = -1;
                 queue_info qi;
                 int s = last_status;
                 if (s < 0xF0) {

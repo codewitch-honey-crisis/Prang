@@ -1,7 +1,7 @@
 #include "note_tracker.hpp"
 #include <string.h>
 note_tracker::note_tracker() {
-    memset(m_notes,0,sizeof(m_notes));
+    memset(m_notes,0,16*(128/8));
 }
 void note_tracker::process(const sfx::midi_message& message) {
     sfx::midi_message_type t = message.type();
